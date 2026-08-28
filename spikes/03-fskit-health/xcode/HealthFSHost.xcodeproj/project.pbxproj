@@ -1,0 +1,215 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* file references */
+		F00000000000000000000001 /* HealthFSHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HealthFSHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F00000000000000000000002 /* HealthFS.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = HealthFS.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F00000000000000000000003 /* HostMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostMain.swift; sourceTree = "<group>"; };
+		F00000000000000000000004 /* HealthFS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HealthFS.swift; path = ../HealthFS.swift; sourceTree = "<group>"; };
+		F00000000000000000000005 /* ext.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ext.entitlements; sourceTree = "<group>"; };
+		F00000000000000000000006 /* ExtInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = ExtInfo.plist; sourceTree = "<group>"; };
+		F00000000000000000000007 /* HostInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = HostInfo.plist; sourceTree = "<group>"; };
+
+/* build files */
+		F00000000000000000000011 /* HostMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003; };
+		F00000000000000000000012 /* HealthFS.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004; };
+		F00000000000000000000013 /* HealthFS.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+
+/* groups */
+		F00000000000000000000021 = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000003,
+				F00000000000000000000004,
+				F00000000000000000000005,
+				F00000000000000000000006,
+				F00000000000000000000007,
+				F00000000000000000000022,
+			);
+			sourceTree = "<group>";
+		};
+		F00000000000000000000022 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000001,
+				F00000000000000000000002,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+
+/* build phases */
+		F00000000000000000000031 /* Sources (host) */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F00000000000000000000011,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F00000000000000000000032 /* Sources (ext) */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F00000000000000000000012,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F00000000000000000000033 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				F00000000000000000000013,
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+
+/* target dependencies */
+		F00000000000000000000041 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F00000000000000000000061;
+			proxyType = 1;
+			remoteGlobalIDString = F00000000000000000000052;
+			remoteInfo = HealthFS;
+		};
+		F00000000000000000000042 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F00000000000000000000052;
+			targetProxy = F00000000000000000000041;
+		};
+
+/* targets */
+		F00000000000000000000051 /* HealthFSHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F00000000000000000000073;
+			buildPhases = (
+				F00000000000000000000031,
+				F00000000000000000000033,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F00000000000000000000042,
+			);
+			name = HealthFSHost;
+			productName = HealthFSHost;
+			productReference = F00000000000000000000001;
+			productType = "com.apple.product-type.application";
+		};
+		F00000000000000000000052 /* HealthFS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F00000000000000000000074;
+			buildPhases = (
+				F00000000000000000000032,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HealthFS;
+			productName = HealthFS;
+			productReference = F00000000000000000000002;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
+
+/* project */
+		F00000000000000000000061 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1700;
+				LastUpgradeCheck = 1700;
+			};
+			buildConfigurationList = F00000000000000000000071;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F00000000000000000000021;
+			productRefGroup = F00000000000000000000022;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F00000000000000000000051,
+				F00000000000000000000052,
+			);
+		};
+
+/* configurations */
+		F00000000000000000000081 /* Release (project) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F00000000000000000000082 /* Release (host) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HostInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.epoch-overlay.healthfs";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		F00000000000000000000083 /* Release (ext) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ext.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ExtInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.epoch-overlay.healthfs.module";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+
+/* configuration lists */
+		F00000000000000000000071 /* project configs */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000081,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F00000000000000000000073 /* host configs */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000082,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F00000000000000000000074 /* ext configs */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000083,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	};
+	rootObject = F00000000000000000000061;
+}
