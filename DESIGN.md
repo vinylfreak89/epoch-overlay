@@ -66,7 +66,7 @@ attribution some other way:
 | ~~macFUSE kext~~ | `fuse_context` carries pid per op | **eliminated — owner hard constraint**: no boot-security downgrade, no untrusted drivers on Apple Silicon. Kextless FUSE (fuse-t) survives as an API convenience only: its localhost-NFS and FSKit backends both lack per-op pid |
 | second macOS user for the isolated agent + localhost NFS at original paths | AUTH_SYS uid per NFS RPC; server branches per uid | operational surgery: Codex runs as another user; permissions outside overlay scope |
 | Endpoint Security client | ES auth events carry pid; can *deny* (gate) writes per process, not redirect them | restricted entitlement; root daemon; gives write-gating, not per-process content |
-| agent in VM (Apple `container` / Virtualization.framework) | the VM boundary itself: guest recreates the same absolute paths (virtiofs lower + overlayfs upper); host untouched | it is the fallback, not the ideal; guest/host toolchain divergence |
+| ~~agent in VM~~ | the VM boundary itself | **eliminated — owner hard constraint**: agents (Claude Code, Wheelhouse, bridge) MUST stay host-side. A VM is admissible only as an overlay *engine*: a thin guest serving an overlay filesystem the host mounts (reached via symlink, iCloud-safe), with every agent process on the host |
 | AgentFS-style `bindProcess` (claimed) | under source investigation — claim conflicts with F1 | unknown |
 
 ## Candidate shapes
