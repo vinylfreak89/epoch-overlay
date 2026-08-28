@@ -110,11 +110,24 @@ full three-way check.
 
 Engine choices — implementation details, not core dependencies, in order of
 preference: **FSKit** path-backed module (macOS 26.0+ `FSPathURLResource`,
-non-root `mount -F`; health on 26.6.1 must be spike-verified given known
-fskitd bugs in 26.1/26.2), **fuse-t** (kext-less localhost NFS), or a
-**thin VM as overlay engine only** — a guest exporting a filesystem the
-host mounts; no Claude, Codex, Wheelhouse, or bridge process ever runs in
-that VM.
+non-root `mount -F`), **fuse-t** (kext-less localhost NFS, vendor-signed —
+no developer account needed to use), or a **thin VM as overlay engine
+only** — a guest exporting a filesystem the host mounts; no Claude, Codex,
+Wheelhouse, or bridge process ever runs in that VM.
+
+Spike 03 verdict (26.6.1): fskitd is healthy — the 26.1/26.2
+unprivileged-client bug is gone, and the registration/enablement pipeline
+works for a hand-built module. The gate is signing:
+`com.apple.developer.fskit.fsmodule` is a restricted entitlement (AMFI
+kills ad-hoc binaries carrying it) and the capability is **not offered to
+free personal teams** — FSKit module development requires a paid Apple
+Developer Program membership. Enrollment is deliberately deferred: the
+viability question is answered and does not expire, tier 1 needs no
+engine, and the membership buys nothing until tier-2 development actually
+begins. Enroll at that point (or earlier if fuse-t proves inadequate);
+`spikes/03-fskit-health/` is the ready starting point. The membership
+changes engines only — it does not add per-operation attribution to
+FSKit, so the epoch shape stands regardless.
 
 iCloud rule for tier 2: an engine is ineligible wherever its covering mount
 would cause fileproviderd to traverse branch state or lose access to
