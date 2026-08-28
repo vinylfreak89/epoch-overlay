@@ -72,10 +72,28 @@ now **verified negative** for FSKit as shipped. Isolation must be temporal
 
 ## Prior art
 
-- **AgentFS** (blocksense-network/agent-harbor): FSKit-based agent filesystem
-  with snapshots, branches, lazy copy-up, and a claimed `bindProcess` XPC op
-  binding a pid to a branch. Given Apple's no-attribution statement, the
-  enforcement of that claim is suspect — read the source before trusting it.
+- **AgentFS** (blocksense-network/agent-harbor) — source-verified 2026-08-29
+  (repo since gone private; read via DeepWiki index of commit `edcda2bd` plus
+  their live docs). Verdict: **cooperative only, no attribution trick.**
+  `bindProcess` inserts a *client-supplied* pid into a `HashMap<pid,BranchId>`
+  in FsCore; it is honored per-operation only where the platform supplies a
+  caller pid — their Linux FUSE adapter. The macOS FSKit adapter's FFI
+  surface (`agentfs_open(ctx, path, mode)` …) carries no pid or audit token
+  anywhere. Their DYLD-interpose variant self-reports identity over a socket
+  handshake (no peer-credential check). Apple's no-attribution statement is
+  corroborated, not refuted.
+  What their shipped macOS design *does* reveal: **path-encoded attribution**
+  — one mount exposes each branch as a distinct full-root directory
+  (`/branches/task-N/...`, "path-based resolution, no kernel PID lookup"),
+  and each agent is confined into its branch (their docs say chroot;
+  their launcher code applies a Seatbelt profile via `sandbox_init`).
+  Steal-worthy ideas: CloneEager branch materialization (APFS `clonefile`
+  per file — O(n) metadata, minimal storage, strong isolation), copy-up via
+  `clone_cow`/clonefile, whiteouts, metadata-only overlay entries, and
+  SCM_RIGHTS fd-forwarding so data I/O runs at native speed while only
+  namespace operations are brokered. Their FSKit mount has no CI test on any
+  macOS (filesystem tests run only on Linux/FUSE) — treat the module itself
+  as unproven.
 - **loaf** (andrewgazelka/loaf): the same overlay-for-agents design, currently
   blocked on the 26.x fskitd bug; rejected `cp -c` clonefile as file-only.
 - Codex CLI and Claude Code both sandbox via dynamically generated Seatbelt
