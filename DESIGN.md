@@ -5,9 +5,11 @@ converged. Spike evidence in `spikes/`, web research in `RESEARCH.md`.
 
 ## Target (the owner's ideal, verbatim requirements)
 
-1. **Fully transparent**: all file writes to the filesystem — or a large
-   subsection of it, e.g. the home folder — go through the overlay. Agents
-   work at original absolute paths without knowing the overlay exists.
+1. **Fully transparent**: all file writes within scope go through the
+   overlay. Agents work at original absolute paths without knowing the
+   overlay exists. **Scope ceiling is the user directory (`~`)** — owner
+   decision 2026-08-29: no full-root coverage, no full-disk access, no TCC
+   involvement; system paths stay untouched real filesystem.
 2. **Concurrent writes**: an isolated writer (e.g. a dispatched Codex turn)
    mutates a private copy-on-write branch while other processes continue to
    see and mutate canonical content — at the same paths.
