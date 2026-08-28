@@ -1,114 +1,152 @@
-# Transparent overlay for coexisting agents — design space
+# Epoch overlay — converged design
 
-Status: **draft v0.2** — under active design exchange (Claude ⇄ Codex), not
-converged. Spike evidence in `spikes/`, web research in `RESEARCH.md`.
+Status: **v1.0 — converged** (Claude ⇄ Codex design exchange, 2026-08-29).
+The observable semantics live in `CONTRACT.md`; evidence in `spikes/` and
+`RESEARCH.md`. Decision history is in git.
 
-## Target (the owner's ideal, verbatim requirements)
+## Shape
 
-1. **Fully transparent**: all file writes within scope go through the
-   overlay. Agents work at original absolute paths without knowing the
-   overlay exists. **Scope ceiling is the user directory (`~`)** — owner
-   decision 2026-08-29: no full-root coverage, no full-disk access, no TCC
-   involvement; system paths stay untouched real filesystem.
-2. **Concurrent writes**: an isolated writer (e.g. a dispatched Codex turn)
-   mutates a private copy-on-write branch while other processes continue to
-   see and mutate canonical content — at the same paths.
-3. **macOS/APFS-native preferred.** A thin Linux VM serving an NFS-style
-   overlay over *hand-picked folders* is the accepted fallback — the folder
-   registry is a property of the fallback, not of the ideal.
-4. **iCloud sync must keep working** throughout.
+Writers never own canonical. Any unit of work — a Claude turn, a Claude
+sub-agent, a Codex thread — is a writer of equal standing; canonical is a
+trunk that advances only through reviewed publications; precedence is
+publication order, not writer identity. Isolation is **temporal** (epochs),
+because per-process views at one path are unavailable on macOS without
+mechanisms the owner has ruled out (see *Eliminated routes*).
 
-Publication happens at a boundary, per path, by the three-way rule:
+Scope ceiling: the user directory (`~`). System paths are never touched.
+iCloud is a pure compatibility constraint: fileproviderd must keep seeing
+and syncing canonical content normally.
 
-```
-current == base                 apply the branch result
-current == result               already equivalent
-current != base and result != base    conflict; never overwrite automatically
-```
+The design is two tiers plus documented extensions. Tier 1 ships first.
 
-## Established facts (each verified — see RESEARCH.md and spikes/)
+## Tier 1 — serialized in-place epochs (build now)
 
-- **F1. FSKit has no per-operation caller identity.** Confirmed two ways:
-  no pid/audit-token in any volume-operation signature in the macOS 26 SDK
-  (local grep), and a direct Apple engineering statement to Meta's EdenFS
-  team: "FSKit does not support process attribution." A single FSKit mount
-  answers every process identically.
-- **F2. Path-backed FSKit modules exist as of macOS 26.0**
-  (`FSPathURLResource`), are mounted via non-root `mount -F`, but fskitd
-  rejected unprivileged clients in 26.1/26.2 (Apple bugs); status on this
-  machine's 26.6.1 unverified.
-- **F3. Covering mounts work for regular users** over non-empty directories,
-  and a pre-mount fd retains read/write access to covered content
-  (spike 01).
-- **F4. fileproviderd fights foreign mutation.** It has been observed
-  reverting local shell operations inside synced areas; symlink and
-  mountpoint tricks inside FileProvider-managed scope are hazardous and
-  undocumented.
-- **F5. macOS has no mount namespaces**; a mount is globally visible.
-- **F6. Localhost userspace NFS servers mounted by the built-in client are a
-  proven root-less pattern** (fuse-t, rclone nfsmount). NFS AUTH_SYS carries
-  per-request uid/gid — but not pid.
+Not an overlay, and not claimed to be: a per-root cooperative writer lane,
+an APFS copy-on-write checkpoint, in-place native writes, and a durable
+review at the end. Its safety comes from serialization plus undo evidence.
 
-## The central lemma
+Lifecycle per enrolled root:
 
-Requirements 1, 2 and 4 interlock:
+1. Resolve the enrolled root; its canonical real path must be within `~`.
+2. Atomically acquire the root's writer lane (nested/overlapping registered
+   roots count as one lane conflict).
+3. Recursively `clonefile` the root into the control store as `base`.
+   This is snapshot-*like*, not an atomic volume snapshot: O(entries), and
+   consistent only because the lane is held before traversal begins.
+4. Only after the clone completes may the writer mutate canonical, at
+   original absolute paths — full transparency, native APFS performance,
+   and iCloud untouched (no mount exists; fileproviderd sees canonical).
+5. On the terminal event, capture the `base → current` diff as the epoch's
+   review record; retain the checkpoint; release the lane.
 
-> An overlay that interposes **all** writes in a scope must distinguish
-> writers, or it cannot both capture an agent's writes into a branch and let
-> fileproviderd's sync-down writes reach canonical. **No attribution ⇒ either
-> the scope excludes iCloud-managed areas, or iCloud breaks by
-> construction.**
+Honest limits, stated plainly:
 
-With F1, every mac-native no-kext single-mount mechanism lacks attribution.
-So the fully-transparent ideal survives only on routes that recover
-attribution some other way:
+- `result == current` by construction; "publication" is retrospective
+  review. Bytes were visible in canonical throughout the epoch.
+- A lane-violating concurrent writer is **invisible**: its changes are
+  indistinguishable from the owner's in the diff. Tier 1 cannot attribute
+  or detect that conflict.
+- A tier-1 "park" can park the lane and the recovery decision; it cannot
+  claim conflicting bytes were never published.
 
-| route | how attribution is recovered | cost |
-|---|---|---|
-| ~~macFUSE kext~~ | `fuse_context` carries pid per op | **eliminated — owner hard constraint**: no boot-security downgrade, no untrusted drivers on Apple Silicon. Kextless FUSE (fuse-t) survives as an API convenience only: its localhost-NFS and FSKit backends both lack per-op pid |
-| second macOS user for the isolated agent + localhost NFS at original paths | AUTH_SYS uid per NFS RPC; server branches per uid | operational surgery: Codex runs as another user; permissions outside overlay scope |
-| Endpoint Security client | ES auth events carry pid; can *deny* (gate) writes per process, not redirect them | restricted entitlement; root daemon; gives write-gating, not per-process content |
-| ~~agent in VM~~ | the VM boundary itself | **eliminated — owner hard constraint**: agents (Claude Code, Wheelhouse, bridge) MUST stay host-side. A VM is admissible only as an overlay *engine*: a thin guest serving an overlay filesystem the host mounts (reached via symlink, iCloud-safe), with every agent process on the host |
-| AgentFS-style `bindProcess` (claimed) | under source investigation — claim conflicts with F1 | unknown |
+### Event boundaries
 
-## Candidate shapes
+Claude Code (hooks carry `agent_id`, so the lane owner is the actual work
+unit, not the conversation):
 
-### A. Fully transparent per-process overlay (the ideal)
+- **Open** lazily at the first potentially mutating `PreToolUse` (Bash,
+  edit/write tools, and unknown filesystem-capable tools count as writers);
+  the hook completes lane acquisition and the base clone before the tool
+  runs.
+- **Close** on `Stop` (main unit) / `SubagentStop` (sub-agent), after the
+  review diff is captured.
+- Lost session or failure → state `orphaned`; the lane is **not** released.
+- No reentrant parent privilege: a parent yields its epoch before handing
+  same-root writable work to a sub-agent; same-root sub-agents serialize; a
+  child that cannot be put behind the lane is read-only for that root.
 
-Blocked native-and-kextless by F1 unless the AgentFS investigation or Apple
-adds attribution. Nearest realizations, in descending nativeness: second-uid
-NFS branch server; macFUSE; agent-in-VM. All three keep original absolute
-paths for the isolated writer and true concurrency. iCloud survives by
-exempting the fileproviderd-facing view (attribution makes that possible).
+Wheelhouse/Codex:
 
-### B. Epoch overlay (temporal isolation — fallback shape, mac-native)
+- **Open** synchronously before the bridge forwards `turn/start` (waiting
+  for the async `turn/started` notification would race; that notification
+  only binds the turn id to the already-open epoch).
+- **Close** on `turn/completed` / `turn/failed`, after review.
+  `turn/interrupt` is not terminal — hold the lane until the terminal
+  notification.
+- `bridge/disconnected` → `orphaned`.
 
-Documented at v0.1: mount an overlay *at* a root for the duration of a write
-epoch; everyone sees the branch; canonical is mechanically unwritable by
-path; publication = three-way rule; per-root writer lanes. Fails requirement
-2 in the strict sense (same-root writers serialize; the concurrent writer's
-changes land in the shared branch). Retained because it is native, kextless,
-and mechanically protects canonical — but it is not the target.
+### Lane state and crash recovery
 
-### C. VM fallback (accepted by owner)
+State lives outside projects, e.g.
+`~/Library/Application Support/Wheelhouse/Epochs/` (excluded from any
+enrolled root that contains it). One atomic lane directory per root:
+canonical root + filesystem identity, epoch and work-unit ids, controller
+and pid/process-start identity, turn/agent ids, base location, state
+(`opening | active | reviewing | orphaned | closed`), timestamps for
+diagnosis only.
 
-Thin Linux VM; hand-picked host folders shared as read-only lowers via
-virtiofs; overlayfs upper on guest-local disk; merged view exported to the
-host via NFS over host-only networking, or the agent simply runs inside the
-guest at recreated absolute paths. Selective enrollment is inherent to this
-shape (each folder needs a share + export). iCloud-safe by keeping enrolled
-roots outside synced scope and merging back as plain writes.
+Acquisition is atomic directory creation. **No TTLs; age is never grounds
+to steal a lane.** On crash/disconnect: mark `orphaned`, keep the lane
+closed, verify recorded process/turn state, produce the durable
+`base → current` recovery diff, and require an explicit human/agent action:
+resume the same owner, adopt current, restore selected content from base,
+or abandon the checkpoint and release. No terminal event ⇒ no automatic
+release.
 
-## Open questions (convergence targets)
+## Tier 2 — the actual overlay (enforcement, later)
 
-1. Does anything recover per-process attribution natively without a kext?
-   (AgentFS source read pending; ES write-gating hybrid pending judgment.)
-2. Is a whole-home overlay operationally survivable at all (login order,
-   keychain, TCC, Spotlight, perf on hot paths), even given attribution —
-   or is the realistic transparent scope "home minus system/iCloud areas"?
-3. fskitd health on 26.6.1 (spike needed: minimal path-backed module).
-4. Second-user route: can Codex run usably as another uid with the NFS
-   overlay granting it access *within* scope? What breaks outside scope?
-5. VM route: virtiofs xattr support for overlayfs upper on this host;
-   guest→host NFS perf for builds.
-6. Publication UX: epoch boundaries, conflict surfacing, provenance.
+A covering mount over the root for the duration of the epoch:
+
+- writes land in a branch; ordinary path traversal cannot mutate canonical;
+- a crash leaves `base` and the branch both intact;
+- a lane violator contaminates the reviewable branch, not canonical;
+- publication finally has independent `base` / `result` / `current`, so the
+  loud, parked, self-describing conflicts of `CONTRACT.md` become fully
+  real.
+
+Qualification (spike 01): pre-existing directory fds write *through* a
+covering mount, so "canonical frozen" is approximate and tier 2 keeps the
+full three-way check.
+
+Engine choices — implementation details, not core dependencies, in order of
+preference: **FSKit** path-backed module (macOS 26.0+ `FSPathURLResource`,
+non-root `mount -F`; health on 26.6.1 must be spike-verified given known
+fskitd bugs in 26.1/26.2), **fuse-t** (kext-less localhost NFS), or a
+**thin VM as overlay engine only** — a guest exporting a filesystem the
+host mounts; no Claude, Codex, Wheelhouse, or bridge process ever runs in
+that VM.
+
+iCloud rule for tier 2: an engine is ineligible wherever its covering mount
+would cause fileproviderd to traverse branch state or lose access to
+canonical; such a root simply stays tier 1 until an engine demonstrates
+compatibility. Branch stores are never located in synced areas.
+
+## Eliminated routes (owner constraints, or verified impossible)
+
+| route | status |
+|---|---|
+| per-process views from one FSKit mount | impossible — Apple: "FSKit does not support process attribution"; corroborated by SDK inspection and AgentFS source verdict |
+| macFUSE kext | eliminated — no boot-security downgrade / untrusted drivers on Apple Silicon |
+| agent-in-VM / container-per-writer | eliminated — agents, Wheelhouse, and the bridge stay host-side |
+| iCloud as mechanism or sync channel | never proposed; iCloud is compatibility-only |
+
+## Out-of-scope extensions (documented, not planned)
+
+For the day genuine same-root parallelism justifies their weight:
+**path-encoded attribution + chroot** (one mount exposes each branch as a
+full-root subtree; a privileged launcher chroots each writer into its
+branch, restoring original absolute paths; heavyweight — the chrooted
+process still needs usable system paths); **Endpoint Security** write-gating
+(pid-attributed deny, cannot branch content; restricted entitlement);
+**second-uid NFS** (rejected for the symmetric model — uids don't scale to
+N sub-agents). Adopted ideas from AgentFS: CloneEager materialization,
+`clonefile` copy-up, whiteouts; its `bindProcess` is confirmed *not* a
+macOS attribution mechanism.
+
+## Next spike (agreed)
+
+Tier-1 lifecycle prototype on one representative root: atomic lane
+acquisition, tree clone, modify/create/delete/rename/symlink/xattr at
+original paths, `base → current` capture, then **kill the owner mid-epoch**
+and verify restart reports an orphaned lane with a usable recovery diff
+rather than releasing it. Measure clone time and metadata growth.
