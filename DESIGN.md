@@ -49,31 +49,37 @@ Honest limits, stated plainly:
 - A tier-1 "park" can park the lane and the recovery decision; it cannot
   claim conflicting bytes were never published.
 
-### Event boundaries
+### Lifecycle binding (revised 2026-08-29, owner decision: no hooks)
 
-Claude Code (hooks carry `agent_id`, so the lane owner is the actual work
-unit, not the conversation):
+The original convergence bound epochs to Claude `PreToolUse`/`Stop` hooks.
+The owner rejected that constraint — per-harness hooks break the
+transparency invariant. Tier 1 therefore splits into two independent
+layers:
 
-- **Open** lazily at the first potentially mutating `PreToolUse` (Bash,
-  edit/write tools, and unknown filesystem-capable tools count as writers);
-  the hook completes lane acquisition and the base clone before the tool
-  runs.
-- **Close** on `Stop` (main unit) / `SubagentStop` (sub-agent), after the
-  review diff is captured.
-- Lost session or failure → state `orphaned`; the lane is **not** released.
-- No reentrant parent privilege: a parent yields its epoch before handing
-  same-root writable work to a sub-agent; same-root sub-agents serialize; a
-  child that cannot be put behind the lane is read-only for that root.
+**Ambient layer (the new build — zero agent configuration).** A daemon
+(LaunchAgent) watches enrolled roots via FSEvents. It takes a `clonefile`
+checkpoint whenever a root goes quiescent, so a pre-burst base exists by
+construction before any write activity; when a burst ends it produces the
+`base → current` review diff. This covers *every* writer — Claude, Codex,
+sub-agents, the human in a bare shell — with no hooks, no wrappers, and no
+per-tool latency. Its reviews say what changed, not who; attribution
+exists only where the cooperative layer was engaged. If the daemon was
+down when a burst began, the diff is computed against the older base and
+the review must say so.
 
-Wheelhouse/Codex:
-
-- **Open** synchronously before the bridge forwards `turn/start` (waiting
-  for the async `turn/started` notification would race; that notification
-  only binds the turn id to the already-open epoch).
-- **Close** on `turn/completed` / `turn/failed`, after review.
-  `turn/interrupt` is not terminal — hold the lane until the terminal
-  notification.
-- `bridge/disconnected` → `orphaned`.
+**Cooperative layer (retained, not rebuilt).** The existing `codex-run`
+tree lock remains the mutual-exclusion mechanism, extended inside that
+skill rather than replaced by a new hook system. Placement rule: a lane is
+acquired at a chokepoint *every* turn of a controller surface passes
+through, regardless of initiator — for Codex that is Wheelhouse's turn
+submission path (GUI-typed and Claude-dispatched alike; verify where
+typed turns actually enter before wiring it). Claude's own turns and raw
+human shells have no such product chokepoint and rely on the ambient
+layer (explicit `epochctl begin` remains available for deliberately risky
+work). Two hardening notes carried over from the epoch semantics, to
+apply to the lock where feasible: contention should refuse loudly rather
+than warn-and-proceed, and a dead owner should park for explicit
+recovery rather than expire on age.
 
 ### Lane state and crash recovery
 
