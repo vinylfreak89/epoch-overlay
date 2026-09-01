@@ -146,7 +146,10 @@ Components:
 3. **Agent adapters speaking each product's API directly** — Codex's
    app-server JSON-RPC and Claude Code's session surface — never through
    a personal bridge, so switching agent products swaps an adapter, not
-   the architecture.
+   the architecture. Each adapter must cover **both form factors of its
+   product** — the CLI and the desktop app — for injection, session
+   enumeration, and process-tree registration alike; a surface that only
+   reaches one form factor is a partial adapter, not a solution.
 
 Escalation ladder for a write without the lane:
 
