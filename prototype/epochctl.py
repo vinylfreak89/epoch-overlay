@@ -7,10 +7,16 @@ action.
 
 Commands:
   begin   --root R [--owner-pid P]     acquire lane, clone base, activate
+                                       (a guarded root is unflagged for the epoch)
   end     --root R                     review (base->current), close, release
+                                       (a guarded root is re-flagged immutable)
   status  [--root R]                   report lanes; detect orphans (no release)
   recover --root R --action adopt|abandon
                                        explicit resolution of an orphaned lane
+  guard   --root R                     enroll R: write sentinel, chflags -R uchg.
+                                       Idle root then refuses ALL writes (EPERM)
+                                       until an epoch is opened.
+  unguard --root R                     remove flags + sentinel, deregister
 
 State layout (one atomic lane dir per root under $EPOCH_STATE_DIR):
   <state>/<rootkey>/           lane dir; its existence IS the lane
@@ -114,6 +120,126 @@ def diff_trees(base, current):
                        "modified": len(modified)}}
 
 
+SENTINEL = "EPOCH-GUARDED.md"
+SENTINEL_TEXT = """# This directory is write-protected by epoch-overlay
+
+You got `EPERM` / "Operation not permitted" because this tree is a
+GUARDED ROOT: every entry carries the macOS user-immutable flag (`uchg`)
+while no write epoch is open. This is coordination between coexisting
+agents (Claude, Codex, humans), not file corruption and not a permissions
+bug. Do NOT run `chflags nouchg` yourself - that bypasses coordination.
+
+To write here, open an epoch (snapshots the tree, records you as owner,
+unlocks it), do your work, then close it (diffs, reviews, re-locks):
+
+    epochctl begin --root '{root}'
+    ... your changes ...
+    epochctl end   --root '{root}'
+
+`epochctl status` shows who holds the epoch if `begin` refuses.
+Details: https://github.com/vinylfreak89/epoch-overlay
+"""
+
+
+def registry_path():
+    return os.path.join(STATE, "registry.json")
+
+
+def read_registry():
+    try:
+        with open(registry_path()) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_registry(reg):
+    os.makedirs(STATE, exist_ok=True)
+    tmp = registry_path() + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(reg, f, indent=1)
+    os.replace(tmp, registry_path())
+
+
+def is_guarded(root):
+    return read_registry().get(rootkey(root), {}).get("guarded", False)
+
+
+def set_flags(root, flag):
+    """chflags -R uchg|nouchg on every entry of root, root included."""
+    r = subprocess.run(["chflags", "-R", flag, root],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"chflags -R {flag} failed: {r.stderr.strip()}")
+
+
+def write_sentinel(root):
+    p = os.path.join(root, SENTINEL)
+    if not os.path.exists(p):
+        with open(p, "w") as f:
+            f.write(SENTINEL_TEXT.format(root=root))
+
+
+def fileprovider_ancestor(path):
+    """Nearest ancestor (or path itself) inside a FileProvider (iCloud) sync
+    domain, or None. uchg on synced content breaks sync both ways: sync-down
+    writes get EPERM, and the flag is Finder's 'locked' bit, which propagates
+    across devices."""
+    p = os.path.realpath(path)
+    home = os.path.realpath(os.path.expanduser("~"))
+    while True:
+        try:
+            xattrs = _listxattr(p)
+        except OSError:
+            xattrs = []
+        if "com.apple.file-provider-domain-id" in xattrs:
+            return p
+        if p in (home, "/"):
+            return None
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+
+
+def cmd_guard(args):
+    root = resolve_root(args.root)
+    if os.path.isdir(lane_dir(root)):
+        die("an epoch is open (or parked) on this root; close it first")
+    fp = fileprovider_ancestor(root)
+    if fp:
+        die(f"refusing to guard {root}: it is inside the iCloud/FileProvider "
+            f"sync domain rooted at {fp}. The immutable flag would break "
+            "sync (EPERM on sync-down; lock state propagates to other "
+            "devices). This root can only get watch-only coverage; to use "
+            "enforce mode, work in a directory outside iCloud scope.")
+    reg = read_registry()
+    reg[rootkey(root)] = {"root": root, "guarded": True,
+                          "since": time.strftime("%FT%T%z")}
+    write_registry(reg)
+    write_sentinel(root)
+    t0 = time.monotonic()
+    set_flags(root, "uchg")
+    print(f"guarded {root} (immutable in {round(time.monotonic()-t0, 3)}s; "
+          f"writes now fail with EPERM until 'epochctl begin')")
+
+
+def cmd_unguard(args):
+    root = resolve_root(args.root)
+    if os.path.isdir(lane_dir(root)):
+        die("an epoch is open (or parked) on this root; close it first")
+    if not is_guarded(root):
+        die(f"{root} is not guarded")
+    set_flags(root, "nouchg")
+    sentinel = os.path.join(root, SENTINEL)
+    if os.path.exists(sentinel):
+        os.unlink(sentinel)
+    reg = read_registry()
+    reg.pop(rootkey(root), None)
+    write_registry(reg)
+    print(f"unguarded {root} (writable again; no longer enrolled)")
+
+
 def lane_dir(root):
     return os.path.join(STATE, rootkey(root))
 
@@ -158,8 +284,12 @@ def cmd_begin(args):
     pid = args.owner_pid or os.getppid()
     meta = {"root": root, "epoch": f"e{int(time.time())}-{os.getpid()}",
             "owner_pid": pid, "owner_start": pid_start_time(pid),
+            "guarded": is_guarded(root),
             "state": "opening", "opened_at": time.strftime("%FT%T%z")}
     write_meta(ld, meta)
+    if meta["guarded"]:
+        # unflag before cloning so the base clone is not itself immutable
+        set_flags(root, "nouchg")
     t0 = time.monotonic()
     r = subprocess.run(["cp", "-cR", root, os.path.join(ld, "base")],
                        capture_output=True, text=True)
@@ -186,6 +316,9 @@ def cmd_end(args):
     review = diff_trees(os.path.join(ld, "base"), root)
     with open(os.path.join(ld, "review.json"), "w") as f:
         json.dump(review, f, indent=1)
+    if meta.get("guarded"):
+        write_sentinel(root)          # recreate if the epoch deleted it
+        set_flags(root, "uchg")       # re-lock, including files created now
     meta["state"] = "closed"
     meta["closed_at"] = time.strftime("%FT%T%z")
     write_meta(ld, meta)
@@ -237,6 +370,9 @@ def cmd_recover(args):
     # adopt: accept current canonical as the outcome (review stands as diff)
     # abandon: keep nothing but the archive; canonical stays as-is either way
     # -- tier 1 never rewrites canonical automatically (CONTRACT.md).
+    if meta.get("guarded"):
+        write_sentinel(meta["root"])
+        set_flags(meta["root"], "uchg")   # a recovered guarded root re-locks
     meta["state"] = "closed"
     meta["resolution"] = args.action
     meta["closed_at"] = time.strftime("%FT%T%z")
@@ -250,7 +386,7 @@ def cmd_recover(args):
 def main():
     ap = argparse.ArgumentParser(prog="epochctl")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("begin", "end", "recover"):
+    for name in ("begin", "end", "recover", "guard", "unguard"):
         p = sub.add_parser(name)
         p.add_argument("--root", required=True)
         if name == "begin":
@@ -261,7 +397,8 @@ def main():
     sub.add_parser("status").add_argument("--root")
     args = ap.parse_args()
     {"begin": cmd_begin, "end": cmd_end,
-     "status": cmd_status, "recover": cmd_recover}[args.cmd](args)
+     "status": cmd_status, "recover": cmd_recover,
+     "guard": cmd_guard, "unguard": cmd_unguard}[args.cmd](args)
 
 
 if __name__ == "__main__":

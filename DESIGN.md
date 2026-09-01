@@ -67,6 +67,24 @@ exists only where the cooperative layer was engaged. If the daemon was
 down when a burst began, the diff is computed against the older base and
 the review must say so.
 
+**Guard layer (owner-identified 2026-09-01, verified in spike 04).** For
+hand-picked roots *outside iCloud scope*, tier 1 gains real mechanical
+enforcement with no overlay and no attribution: the root is
+`chflags uchg` (user-immutable, recursively) while idle. Any writer that
+never heard of the protocol hits a kernel `EPERM` and finds
+`EPOCH-GUARDED.md` in the root explaining exactly how to proceed;
+`epochctl begin` snapshots, unflags, and records the owner; `end` diffs
+and re-flags (including files created during the epoch); `recover`
+re-flags after a crash. Flag flips cost ~0.01 s per few hundred entries.
+Bypass requires a deliberate `chflags nouchg` — a knowing act, not an
+oversight. `guard` refuses FileProvider-managed roots unconditionally
+(sync-down writes would hit the same EPERM, and uchg is Finder's lock
+bit, which iCloud propagates) — verified live on this machine, where
+`~/Documents` is actively synced CloudDocs. Consequence: tier 2's
+exclusive value narrows to protection *during* open epochs and true
+three-way publication; idle-state protection — the common case — is
+kernel-enforced by tier 1.
+
 **Cooperative layer (retained, not rebuilt).** The existing `codex-run`
 tree lock remains the mutual-exclusion mechanism, extended inside that
 skill rather than replaced by a new hook system. Placement rule: a lane is
