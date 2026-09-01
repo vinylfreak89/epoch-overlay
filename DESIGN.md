@@ -151,20 +151,35 @@ Components:
    enumeration, and process-tree registration alike; a surface that only
    reaches one form factor is a partial adapter, not a solution.
 
-Escalation ladder for a write without the lane:
+Escalation ladder for a write without the lane (floor first, verified in
+spike 05):
 
-1. **Siren** — a message injected mid-turn into the writer's own context:
-   "you don't own this root; stop and establish provenance." Cheap;
-   catches the good-faith case. Cognition-dependent, so never the last
-   rung.
-2. **Freeze** — continued unowned writes ⇒ `SIGSTOP` the writer's process
-   group. Kernel-level, writer-non-overridable, filesystem-untouched.
-   Every evasion an agent invents is still a process in that tree.
-   `SIGCONT` only after adjudication (take the lane, or revert and
-   release).
-3. **Revert** — the post-hoc window's writes are diffed against the
-   checkpoint and reversible; reverts follow the contract (loud, never
-   silent).
+1. **Freeze (the floor, the actual constraint)** — an unowned write ⇒
+   `SIGSTOP` the writer's process group. Kernel-level,
+   writer-non-overridable, filesystem-untouched, product-independent.
+   Every evasion an agent invents is still a process in that tree —
+   verified: a `setsid` group with an evasive write-loop child froze
+   whole and resumed clean. `SIGCONT` only after adjudication (take the
+   lane, or revert and release).
+2. **Revert** — the pre-freeze window's writes (seconds) are diffed
+   against the checkpoint and reversible; reverts follow the contract
+   (loud, never silent). This is the answer to "the first write lands":
+   it lands, it is attributed, it is undone.
+3. **Siren (optimization, not floor)** — where the product exposes a
+   live-injection API, a message into the writer's own context ("you
+   don't own this root; stop and establish provenance") catches the
+   good-faith case before a freeze is needed. **Availability is
+   asymmetric (spike 05): Codex's app-server accepts steer-into-live-turn
+   today; Claude Code exposes no documented stable injection surface on
+   either CLI or app.** So the reconciler must never depend on the siren
+   — a Claude agent that cannot be sirened is simply frozen instead, and
+   reads the situation from the sentinel when it resumes. If/when Claude
+   Code ships an injection surface, the siren adapter lights up with no
+   change to the floor.
+
+Attribution feeding the ladder uses Endpoint Security (`audit_token`
+carries the writer pid); it requires a one-time Full Disk Access grant to
+the daemon (spike 05 — capability present, gated only by that GUI grant).
 
 **The human is a first-class writer**: saving a file in a root an agent's
 epoch owns triggers a bright actionable alert — who owns it, since when,
