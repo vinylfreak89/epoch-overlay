@@ -117,6 +117,69 @@ resume the same owner, adopt current, restore selected content from base,
 or abandon the checkpoint and release. No terminal event ⇒ no automatic
 release.
 
+## The reconciler (converged tier-1 enforcement, 2026-09-01)
+
+A **program, not an agent** — the owner's framing — that closes the loop
+on every write to a guarded root. It supersedes both the hook idea and
+sandbox-coupling (each rejected as convention disguised as constraint:
+anything the writer's own harness configures, or that depends on the
+writer's cognition, gets optimized away — the observed failure mode being
+an agent routing around an annoying write-style rule by writing a python
+script to do the edit).
+
+Model: **land → attribute → reconcile.** Interception is explicitly
+rejected — nothing intercepts writes without breaking sync or an
+eliminated mechanism. A write lands; the reconciler knows who wrote it
+within seconds; unowned writes are confronted and every landed byte is
+revertible from the checkpoint.
+
+Components:
+
+1. **Attribution daemon** (root, installed once via the audited sudo
+   path): consumes the kernel's raw event stream (`/dev/fsevents`, which
+   carries the writing pid — the user-level FSEvents API strips it),
+   filtered to guarded roots. Endpoint Security is the blessed future
+   substitute once the paid account and entitlement exist.
+2. **Reconciler** (user-level): registry of roots and lanes, process-tree
+   registrations from agent surfaces, checkpoint/diff engine (epochctl's
+   logic), policy, and the escalation ladder.
+3. **Agent adapters speaking each product's API directly** — Codex's
+   app-server JSON-RPC and Claude Code's session surface — never through
+   a personal bridge, so switching agent products swaps an adapter, not
+   the architecture.
+
+Escalation ladder for a write without the lane:
+
+1. **Siren** — a message injected mid-turn into the writer's own context:
+   "you don't own this root; stop and establish provenance." Cheap;
+   catches the good-faith case. Cognition-dependent, so never the last
+   rung.
+2. **Freeze** — continued unowned writes ⇒ `SIGSTOP` the writer's process
+   group. Kernel-level, writer-non-overridable, filesystem-untouched.
+   Every evasion an agent invents is still a process in that tree.
+   `SIGCONT` only after adjudication (take the lane, or revert and
+   release).
+3. **Revert** — the post-hoc window's writes are diffed against the
+   checkpoint and reversible; reverts follow the contract (loud, never
+   silent).
+
+**The human is a first-class writer**: saving a file in a root an agent's
+epoch owns triggers a bright actionable alert — who owns it, since when,
+[let it finish] [interrupt it] [take over] — the brief's
+authority-precedence UI, generalized. Humans are sovereign: sirens and
+alerts, never freezes.
+
+**Bypass allowlist, non-negotiable**: fileproviderd/bird (CloudDocs
+prune, hydrate, download, metadata), Spotlight, Time Machine and peers
+are never sirened, frozen, or counted as violations — their activity is
+reconciled as sync/system churn via the three-way rule. Attribution is
+precisely what makes this exemption possible.
+
+Open verifications: `/dev/fsevents` per-op pid on 26.6.1 (root spike);
+SIGSTOP/SIGCONT behavior against live Claude/Codex turns; Claude Code's
+stable external-injection surface; process-tree attribution reliability
+for detached grandchildren.
+
 ## Tier 2 — the actual overlay (enforcement, later)
 
 A covering mount over the root for the duration of the epoch:
