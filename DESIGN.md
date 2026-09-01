@@ -127,19 +127,61 @@ writer's cognition, gets optimized away — the observed failure mode being
 an agent routing around an annoying write-style rule by writing a python
 script to do the edit).
 
-Model: **land → attribute → reconcile.** Interception is explicitly
-rejected — nothing intercepts writes without breaking sync or an
-eliminated mechanism. A write lands; the reconciler knows who wrote it
-within seconds; unowned writes are confronted and every landed byte is
-revertible from the checkpoint.
+Model: **land → attribute → reconcile.** A write lands; the reconciler
+knows who wrote it within seconds; unowned writes are confronted.
+
+> **RETRACTED 2026-09-01.** This paragraph previously read "Interception is
+> explicitly rejected — nothing intercepts writes without breaking sync or
+> an eliminated mechanism", and "every landed byte is revertible from the
+> checkpoint". Both claims are wrong, and both were load-bearing.
+>
+> **Interception exists.** Endpoint Security exposes synchronous
+> *pre-operation* gates — verified against this machine's MacOSX26 SDK: 44
+> `ES_EVENT_TYPE_AUTH_*` events including `AUTH_OPEN`, `AUTH_CREATE`,
+> `AUTH_TRUNCATE`, `AUTH_RENAME`, `AUTH_UNLINK`, `AUTH_CLONE`, `AUTH_MMAP`,
+> each carrying a `deadline` the client must answer before. The kernel
+> suspends the caller until it answers. That is interception at original
+> paths, with no kext, no mount, and no VM. The error was not ignorance —
+> ES is listed under *Out-of-scope extensions* — but **dismissal against the
+> wrong requirement**: it was ruled out for "cannot branch content", i.e.
+> judged against the strong contract's concurrent-writers-and-merge, when
+> the requirement that matters here is only "keep unowned writers out of
+> canonical". Branching is not needed for that.
+>
+> **Selective reversion is impossible** (Codex, 2026-09-01). Attribution
+> yields actor and path, never each actor's prior bytes. If `base` is X, the
+> lane owner produces A, and an unowned writer then produces A+B, neither
+> `base` nor `current` can reconstruct A: restoring base destroys authorized
+> work, keeping current keeps the violation. "It lands, it is attributed, it
+> is undone" therefore cannot hold, and promising it contradicts
+> CONTRACT.md's no-silent-resolution rule. The ladder's rung 2 is corrected
+> to **park** below. Note the consequence: this partly reverses spike 04's
+> conclusion that tier 2 had become less urgent — if tier 1 cannot cleanly
+> undo a violator, the covering mount is again the thing that delivers the
+> contract. Restoring the revert promise would need per-path content
+> journaling during an open epoch (not designed, not costed).
+>
+> ES costs, recorded so this is not re-litigated optimistically: there is no
+> `ES_EVENT_TYPE_AUTH_WRITE` (absent in both the 14.4 and 26.x SDKs), so the
+> gate sits at open/create/rename/unlink/truncate/mmap and an fd opened
+> before the policy applies still writes through — the same bypass class
+> spike 01 found for covering mounts. Deadlines are hard, so policy must
+> decide in milliseconds: deny-and-explain, never park-and-ask-a-human. A
+> dead ES client fails **open**, so protection vanishes silently exactly
+> when the daemon dies. And the entitlement is **discretionary Apple
+> approval**, not merely the paid program — see *Open shape question*.
 
 Components:
 
 1. **Attribution daemon** (root, installed once via the audited sudo
-   path): consumes the kernel's raw event stream (`/dev/fsevents`, which
-   carries the writing pid — the user-level FSEvents API strips it),
-   filtered to guarded roots. Endpoint Security is the blessed future
-   substitute once the paid account and entitlement exist.
+   path). Transport corrected 2026-09-01: this said `/dev/fsevents` with
+   ES as a "blessed future substitute", which contradicted spike 05 (raw
+   fsevents unsupported; ES correct) and contradicted the ladder below in
+   the same document. **ES is the transport**; `audit_token` carries the
+   writer pid. Its NOTIFY events need only a Full Disk Access grant, so the
+   entire policy layer — can fileproviderd/Spotlight churn be separated
+   from an agent write, at what event volume, with what gaps — is testable
+   *without* the restricted entitlement. Only the allow/deny flip needs it.
 2. **Reconciler** (user-level): registry of roots and lanes, process-tree
    registrations from agent surfaces, checkpoint/diff engine (epochctl's
    logic), policy, and the escalation ladder.
@@ -161,10 +203,15 @@ spike 05):
    verified: a `setsid` group with an evasive write-loop child froze
    whole and resumed clean. `SIGCONT` only after adjudication (take the
    lane, or revert and release).
-2. **Revert** — the pre-freeze window's writes (seconds) are diffed
-   against the checkpoint and reversible; reverts follow the contract
-   (loud, never silent). This is the answer to "the first write lands":
-   it lands, it is attributed, it is undone.
+2. **Park** (corrected 2026-09-01; was "Revert") — the pre-freeze window's
+   writes are diffed against the checkpoint and the root is parked for
+   adjudication, loudly and durably. It does **not** promise automatic
+   selective undo: where the lane owner and the violator touched the same
+   file, the owner-only intermediate state is unrecoverable from `base` and
+   `current` alone (see the retraction above), so an automatic revert would
+   either destroy authorized work or retain the violation — both are silent
+   resolutions the contract forbids. Restoring base remains available as an
+   *explicit operator choice* with its cost stated, never as policy.
 3. **Siren (optimization, not floor)** — where the product exposes a
    live-injection API, a message into the writer's own context ("you
    don't own this root; stop and establish provenance") catches the
@@ -261,10 +308,56 @@ N sub-agents). Adopted ideas from AgentFS: CloneEager materialization,
 `clonefile` copy-up, whiteouts; its `bindProcess` is confirmed *not* a
 macOS attribution mechanism.
 
-## Next spike (agreed)
+## Open shape question (2026-09-01) — unresolved, gates everything below
 
-Tier-1 lifecycle prototype on one representative root: atomic lane
-acquisition, tree clone, modify/create/delete/rename/symlink/xattr at
-original paths, `base → current` capture, then **kill the owner mid-epoch**
-and verify restart reports an orphaned lane with a usable recovery diff
-rather than releasing it. Measure clone time and metadata growth.
+The owner's challenge, not yet answered: **is tier 1 the right shape at
+all, or is it being defended by reaching for progressively harder
+mechanisms?** Stated plainly so it is not lost:
+
+- ES AUTH would answer the enforcement gap, but its entitlement is
+  *discretionary Apple approval*, not a purchasable license. The brief for
+  this work is a developer tool with specific grants — reaching for a
+  harder gate to rescue a design is not a justification of that design.
+- The original brief noted that relaxing **any** of (1) transparent
+  original paths, (2) concurrent writes, (3) APFS-native reopens the design
+  space, and that *which relaxation is cheapest was never explored*. Tier 1
+  is the "relax concurrency" branch. The "relax transparency" branch —
+  per-writer worktrees or separate checkouts, merged by git, with each
+  writer confined by a Seatbelt profile it cannot loosen — has never been
+  costed against it, despite needing no entitlement, no approval, no mount,
+  and no new mechanism. Both branches satisfy the stated goal of preventing
+  two agents from mutating one tree concurrently.
+- Any answer that requires wiring a chokepoint into a specific agent
+  harness is rejected on sight: that is the failure mode this project
+  exists to address, and no such wiring will ever cover every edge case.
+
+Until that comparison is done, tier 1 stands as *accident containment and
+forensic review*, not as the converged enforcement design.
+
+## Corrections to the evidence base (2026-09-01)
+
+Verified defects found by re-reading the checked-in artifacts. Recorded
+because each one weakens a claim the design was resting on:
+
+- **Spike 05's `probe.sh` contains no freeze experiment at all** — zero
+  occurrences of `SIGSTOP`/`kill -STOP`/`-CONT`. It runs only the eslogger
+  attribution probe, which itself exits blocked on Full Disk Access. So
+  "Freeze+revert: proven" rests on an observation with no reproducible
+  artifact, while the one experiment that *is* committed did not pass.
+- **`epochctl.py cmd_begin` unflags before it clones** —
+  `set_flags(root, "nouchg")` precedes the `cp -cR` checkpoint, so guard
+  mode's protection is dropped while the checkpoint does not yet exist. A
+  write landing in that window is captured inconsistently and is not
+  recoverable. Same failure shape as the ambient daemon's torn-clone gap.
+- **The ambient "pre-burst base by construction" claim is unbuilt and
+  unestablished** — there is no ambient daemon and no spike; FSEvents
+  reports after the fact and cannot prevent a burst starting mid-clone.
+- **Tier 1 does not satisfy CONTRACT.md** and needs its own weaker,
+  separately named contract: guard mode makes the overlay visible to any
+  unaware writer via `EPERM` with no divergence involved, which the
+  contract permits only at a conflict.
+- **Convention failed live, as predicted** — on 2026-09-01 a GUI-typed
+  Codex turn ran to completion holding no lane, despite the acquire-it-
+  yourself protocol being present in its own context. A writer that does
+  not pass a chokepoint simply does not take the lane. This is evidence
+  *for* mechanism over protocol, and against any harness-wiring fix.

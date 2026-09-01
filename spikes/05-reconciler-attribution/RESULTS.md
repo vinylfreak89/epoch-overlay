@@ -64,3 +64,35 @@ product-independent — this is the real constraint. Siren: Codex yes,
 Claude not yet — degrade gracefully rather than depend on it. None of the
 three needs a filesystem write barrier, so all are compatible with
 iCloud-resident roots.
+
+## CORRECTION (2026-09-01) — the "Net" above overstates this spike
+
+Found by re-reading the committed artifact against the write-up:
+
+1. **`probe.sh` contains no freeze experiment.** Zero occurrences of
+   `SIGSTOP`, `kill -STOP`, or `-CONT`. The committed script runs only the
+   eslogger attribution probe of section A. The section-B numbers were
+   observed but are **not reproducible from this repository**, so "proven"
+   is not supportable. Section A's probe, the only one committed, exits
+   blocked on FDA — it did not pass either.
+2. **"Freeze+revert" is two claims and neither is established here.**
+   Revert is not merely untested but *impossible* in the general case:
+   where the lane owner and a violator both wrote one file, `base` and
+   `current` cannot reconstruct the owner-only state. DESIGN.md's ladder
+   now says **park**, not revert.
+3. **A process group is not a process tree.** Section B stopped a parent
+   and child deliberately placed in one group; it does not license "every
+   evasion an agent invents is still a process in that tree". A descendant
+   can `setsid`, double-fork, route work through a pre-existing helper or
+   `launchctl`, or have a same-UID watchdog send `SIGCONT`. This design's
+   own open-verification list already conceded detached grandchildren.
+4. **The trust model was never stated**, which is what makes (3) ambiguous:
+   `uchg`, the state files, `SIGCONT` and the daemon are all same-UID
+   controllable, so against a deliberately evasive process none of this
+   holds, while against the actual observed failure mode — an agent routing
+   around an annoying rule — it is adequate. The design must say which it
+   defends against before any of these rungs can be called sufficient.
+
+To restore the section-B claim, commit the freeze experiment as a runnable
+probe and extend it to real Claude/Codex process topologies, `setsid` and
+double-fork descendants, shared helpers, and an external `SIGCONT` watchdog.

@@ -52,9 +52,76 @@ now **verified negative** for FSKit as shipped. Isolation must be temporal
   mutations (mv/rm/git mv) inside synced areas, reconciling back to cloud
   state. [github.com/anthropics/claude-code/issues/47241]
 - Symlinks in iCloud areas don't sync usefully; mountpoint-inside-synced-area
-  behavior is undocumented. Safe design: **enrolled roots and branch stores
-  must live outside FileProvider-managed areas** in v1; results merge back
-  into synced folders only as plain file writes.
+  behavior is undocumented. Safe design: ~~**enrolled roots and branch stores
+  must live outside FileProvider-managed areas** in v1~~ — **superseded
+  2026-09-01, see below**; branch stores are still never placed in synced
+  areas.
+
+### CloudDocs: the v1 rule above is overturned (2026-09-01)
+
+Recording this because the decision was made in spike 04 and never written
+back here, leaving the two documents in contradiction.
+
+`~/Documents` on this machine **is** the CloudDocs Documents folder (same
+inode), domain in foreground, actively syncing. So "enrolled roots must live
+outside FileProvider-managed areas" would exclude the actual work. The owner's
+position is explicit: **files are synced with iCloud loudly on purpose, and the
+work is not moving out of `~/Documents`.**
+
+What that costs, per mechanism:
+
+- **`uchg` guard mode is unusable there, permanently.** fileproviderd's
+  sync-down writes take the same `EPERM` as everyone else, and `uchg` is
+  Finder's "locked" bit, which iCloud propagates across devices. `epochctl
+  guard` refuses FileProvider roots unconditionally, and that refusal is
+  correct, not a limitation to engineer around.
+- **Attribution-based mechanisms are compatible**, and uniquely so: ES
+  carries the writer's `audit_token`, so fileproviderd/bird can be allowed at
+  the same path where an unowned agent is denied. This is exactly why the
+  bypass allowlist is possible, and it is the strongest argument for the ES
+  direction over flag-based enforcement.
+
+**Relocation via symlink was considered and rejected.** A symlink cannot yield
+"synced but not FileProvider-managed": either the content resolves into the
+CloudDocs domain, and dataless materialization plus fileproviderd's writes
+follow it, or it lives outside and is not synced at all — which defeats the
+purpose. Combined with the note above that symlinks in iCloud areas don't sync
+usefully, this route is closed. Attribution, not relocation, is the answer.
+
+## Endpoint Security — pre-operation gates (SDK-verified 2026-09-01)
+
+Verified by inspecting this machine's SDKs, the same method used to settle
+FSKit's lack of attribution:
+
+- **44 `ES_EVENT_TYPE_AUTH_*` events** in the MacOSX26 SDK, including
+  `AUTH_OPEN`, `AUTH_CREATE`, `AUTH_TRUNCATE`, `AUTH_RENAME`, `AUTH_UNLINK`,
+  `AUTH_CLONE`, `AUTH_LINK`, `AUTH_COPYFILE`, `AUTH_EXCHANGEDATA`,
+  `AUTH_SETATTRLIST`, `AUTH_SETMODE`, `AUTH_MMAP`. AUTH events are
+  synchronous: the kernel suspends the caller until the client answers.
+- **No `ES_EVENT_TYPE_AUTH_WRITE`** — absent in both the 14.4 and 26.x SDKs.
+  Individual `write(2)` calls are not authorizable; the gate is the
+  open/create/rename/unlink/truncate/mmap boundary. An fd opened before the
+  policy applies still writes through, the same bypass spike 01 found for
+  covering mounts.
+- **`deadline`** is a documented per-message field: "the Mach absolute time
+  before which an auth event must be responded to", and clients that miss it
+  are killed. Policy must therefore decide in milliseconds. Confidence: high
+  (read from the shipped headers).
+- **Entitlement**: `com.apple.developer.endpoint-security.client` is
+  restricted and requires Apple's discretionary approval, which is a
+  different and harder gate than FSKit's paid-program requirement. Apple's
+  own `eslogger` is NOTIFY-only, so AUTH cannot be exercised through it.
+  **Unverified**: whether that approval is obtainable here. This is the open
+  risk, and it is the reason the shape question in DESIGN.md is unresolved
+  rather than settled in ES's favour.
+- **Seatbelt is the no-approval alternative worth costing**: Claude Code and
+  Codex already confine themselves with generated `sandbox-exec` profiles
+  (default-deny writes) at original paths, needing no entitlement and no
+  root. Sandbox policies are inherited by children and can only be tightened,
+  never loosened, so a confined agent cannot escape by spawning a helper —
+  which is precisely the containment property SIGSTOP-on-a-process-group was
+  claimed to have and does not. Its limit is that it binds at launch, so it
+  covers writers we start and not arbitrary ones.
 
 ## VM fallback specifics
 
